@@ -1,0 +1,34 @@
+name: Platform Native Adapter
+description: Implement first platform-native posting adapter
+title: "Implement first platform-native adapter (TikTok or Shorts)"
+labels: ["type:feature", "area:backend", "priority:medium"]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - TikTok
+        - YouTube Shorts
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      placeholder: |
+        - OAuth/token flow
+        - Upload/publish flow
+        - Response mapping to remote_id/remote_status/remote_url
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: |
+        - Successful staging post
+        - Known API errors mapped
+        - Config documented
+    validations:
+      required: true

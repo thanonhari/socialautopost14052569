@@ -1,0 +1,32 @@
+name: Operator Controls
+description: Add Retry/Pause/Resume controls for autopost operations
+title: "Add operator controls: Retry failed, Pause, Resume"
+labels: ["type:feature", "area:frontend", "area:backend", "priority:high"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      placeholder: Allow operators to control autopost lifecycle from UI.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      placeholder: |
+        - Add UI buttons and states
+        - Add backend endpoints
+        - Update queue state handling
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: |
+        - Retry works for failed items
+        - Pause stops sends
+        - Resume continues sends
+    validations:
+      required: true

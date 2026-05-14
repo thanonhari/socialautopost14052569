@@ -1,0 +1,32 @@
+name: Worker Queue
+description: Move autopost execution to persistent worker queue
+title: "Move autopost execution to persistent worker queue"
+labels: ["type:feature", "area:backend", "priority:high"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      placeholder: Improve reliability and restart recovery for autopost delivery.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      placeholder: |
+        - Introduce queue worker process/loop
+        - Persist state transitions
+        - Retry and dead-letter behavior
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      placeholder: |
+        - Queue survives restart
+        - Retries happen by policy
+        - Dead-letter after max retries
+    validations:
+      required: true
