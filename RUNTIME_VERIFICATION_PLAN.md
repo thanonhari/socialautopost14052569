@@ -25,6 +25,12 @@ python app.py
 - at least one highlight clip
 
 3. Set an operator value in the UI toolbar.
+4. For live-mode tests, set:
+
+```powershell
+$env:SOCIALAUTOPOST_APPROVAL_PHRASE="APPROVED"
+$env:SOCIALAUTOPOST_LIVE_MAX_DELIVERIES="3"
+```
 
 ## Test 1: Dry-Run Autopost
 
@@ -34,6 +40,21 @@ Expected result:
 - `autopost.report.json` is created
 - `autopost.queue.json` is created
 - `autopost.audit.jsonl` contains `autopost_started` and delivery events
+
+## Test 1B: Live Guardrails
+
+Steps:
+
+1. Switch mode to `Live`.
+2. Leave approval text blank or incorrect.
+3. Confirm start is rejected.
+4. Enter the correct approval phrase.
+5. Select enough platforms/clips to exceed `SOCIALAUTOPOST_LIVE_MAX_DELIVERIES`.
+
+Expected result:
+
+- incorrect approval phrase blocks live start
+- excessive live delivery count blocks live start
 
 ## Test 2: Pause / Resume
 

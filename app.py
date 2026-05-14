@@ -1430,6 +1430,25 @@ def parse_env_float(name: str, default: float) -> float:
         return default
 
 
+def approval_phrase() -> str:
+    return os.environ.get("SOCIALAUTOPOST_APPROVAL_PHRASE", "APPROVED").strip() or "APPROVED"
+
+
+def count_estimated_deliveries(job_id: str, platforms: list[str]) -> int:
+    job_dir = JOBS_ROOT / job_id
+    exports_index_path = job_dir / "exports" / "index.json"
+    if not exports_index_path.exists():
+        return 0
+    try:
+        payload = json.loads(exports_index_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return 0
+    if not isinstance(payload, list):
+        return 0
+    clip_count = len(payload)
+    return clip_count * len(platforms)
+
+
 def parse_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -2169,6 +2188,7 @@ class AppHandler(BaseHTTPRequestHandler):
             payload = self.read_json()
             operator = resolve_operator(self.headers, payload)
             dry_run = bool(payload.get("dry_run", True))
+            approval = str(payload.get("approval", "")).strip()
             language = str(payload.get("language", "en")).lower()
             if language not in {"en", "th"}:
                 language = "en"
@@ -2188,6 +2208,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 raise ValueError("Job is not ready yet")
             if job.autopost_status == "running":
                 raise ValueError("Autopost is already running")
+            if not job.rights_confirmed:
+                raise ValueError("Rights confirmation is required before autopost")
+            if not dry_run and approval != approval_phrase():
+                raise ValueError(f"Live autopost requires approval phrase: {approval_phrase()}")
+            max_live_deliveries = parse_env_int("SOCIALAUTOPOST_LIVE_MAX_DELIVERIES", 3, minimum=1, maximum=100)
+            if not dry_run:
+                estimated_deliveries = count_estimated_deliveries(job_id, platforms)
+                if estimated_deliveries > max_live_deliveries:
+                    raise ValueError(
+                        f"Live autopost exceeds max deliveries ({estimated_deliveries} > {max_live_deliveries}). "
+                        "Reduce platforms or clips, or raise SOCIALAUTOPOST_LIVE_MAX_DELIVERIES."
+                    )
 
             update_job(
                 job_id,
@@ -2199,6 +2231,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "dry_run": dry_run,
                     "language": language,
                     "operator": operator,
+                    "approval": approval if not dry_run else "",
                 },
             )
             threading.Thread(

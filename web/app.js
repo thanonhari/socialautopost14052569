@@ -266,13 +266,15 @@ function renderDetails(job) {
     autopostButton.addEventListener("click", () => {
       const modeInput = jobDetails.querySelector("[data-autopost-mode]");
       const languageInput = jobDetails.querySelector("[data-autopost-language]");
+      const approvalInput = jobDetails.querySelector("[data-autopost-approval]");
       const platformInputs = jobDetails.querySelectorAll("[data-autopost-platform]:checked");
       const mode = modeInput ? modeInput.value : "dry";
       const language = languageInput ? languageInput.value : "en";
+      const approval = approvalInput ? approvalInput.value.trim() : "";
       const platforms = platformInputs.length
         ? Array.from(platformInputs).map((item) => item.value)
         : ["tiktok", "reels", "shorts"];
-      startAutopost(job.id, autopostButton, mode, language, platforms);
+      startAutopost(job.id, autopostButton, mode, language, platforms, approval);
     });
   }
   const pauseButton = jobDetails.querySelector("[data-autopost-pause]");
@@ -350,6 +352,10 @@ function renderAutopost(job) {
           <option value="en" selected>English</option>
           <option value="th">Thai</option>
         </select>
+      </label>
+      <label class="field">
+        <span>Live approval</span>
+        <input data-autopost-approval type="text" placeholder="APPROVED" />
       </label>
       <div class="autopost-platforms">
         <label class="check"><input type="checkbox" data-autopost-platform="tiktok" value="tiktok" checked /><span>TikTok</span></label>
@@ -482,7 +488,7 @@ async function openFolder(jobId, button) {
   }
 }
 
-async function startAutopost(jobId, button, mode = "dry", language = "en", platforms = ["tiktok", "reels", "shorts"]) {
+async function startAutopost(jobId, button, mode = "dry", language = "en", platforms = ["tiktok", "reels", "shorts"], approval = "") {
   const original = button.textContent;
   button.disabled = true;
   button.textContent = "Autopost running...";
@@ -502,6 +508,7 @@ async function startAutopost(jobId, button, mode = "dry", language = "en", platf
         language,
         platforms,
         operator: currentOperator(),
+        approval,
       }),
     });
     const data = await response.json();

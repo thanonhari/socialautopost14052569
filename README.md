@@ -78,6 +78,8 @@ $env:SOCIALAUTOPOST_SHORTS_ENDPOINT="https://your-api.example.com/shorts/post"
 $env:SOCIALAUTOPOST_SHORTS_SIGNING_SECRET="your_hmac_secret"
 $env:SOCIALAUTOPOST_AUTOPOST_TIMEOUT_SEC="20"
 $env:SOCIALAUTOPOST_AUTOPOST_RETRIES="2"
+$env:SOCIALAUTOPOST_APPROVAL_PHRASE="APPROVED"
+$env:SOCIALAUTOPOST_LIVE_MAX_DELIVERIES="3"
 python app.py
 ```
 
@@ -165,6 +167,11 @@ Current operator controls:
 - Pause
 - Resume
 - Retry failed
+
+Live-mode guardrails:
+
+- approval text must match `SOCIALAUTOPOST_APPROVAL_PHRASE`
+- delivery count must not exceed `SOCIALAUTOPOST_LIVE_MAX_DELIVERIES`
 
 ## Output Structure
 

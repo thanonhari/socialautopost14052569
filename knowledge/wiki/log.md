@@ -97,3 +97,7 @@ Extended the Shorts native adapter to reuse valid access tokens, refresh expired
 ## [2026-05-14] audit | Added operator attribution for autopost actions
 
 Added operator attribution to autopost start/pause/resume/retry actions through `X-Operator` and request payload metadata. The UI now stores a local operator value and the audit log records that operator on delivery and control events.
+
+## [2026-05-14] policy | Added live approval and delivery-count guardrails
+
+Added a live-mode approval phrase check and a max-deliveries-per-job guardrail. Live autopost now requires a matching approval value and can be capped with `SOCIALAUTOPOST_LIVE_MAX_DELIVERIES` before any send begins.

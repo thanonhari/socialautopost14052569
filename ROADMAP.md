@@ -467,6 +467,7 @@ Current prototype status: YouTube Shorts native path now supports access-token e
 4. Operator controls in UI (`Retry failed`, `Pause`, `Resume`) and audit trail.
 Current prototype status: basic controls, operator attribution, and append-only JSONL audit log are implemented; production version still needs stronger auth integration and immutable storage.
 5. Policy/guardrails for production enablement (rate limits, account safety checks, approval gates).
+Current prototype status: live approval phrase and per-job max-delivery guardrail are implemented.
 
 ## Work Deployment Checklist
 
