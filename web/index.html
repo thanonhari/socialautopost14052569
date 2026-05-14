@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SocialAutoPost Local</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="toolbar">
+        <div>
+          <h1>SocialAutoPost Local</h1>
+          <p>Ingest X, Reddit, YouTube Shorts, or local video files, then prepare metadata, normalized MP4, caption draft, and a manifest for short-form posting workflows.</p>
+        </div>
+        <button id="refreshBtn" type="button">Refresh</button>
+      </section>
+
+      <section class="panel">
+        <form id="jobForm" class="job-form">
+          <fieldset class="source-switch">
+            <legend>Source</legend>
+            <label>
+              <input type="radio" name="sourceMode" value="url" checked />
+              <span>URL</span>
+            </label>
+            <label>
+              <input type="radio" name="sourceMode" value="file" />
+              <span>Local file</span>
+            </label>
+          </fieldset>
+
+          <label class="field wide source-url">
+            <span>Source URL</span>
+            <input id="urlInput" name="url" type="url" placeholder="https://x.com/... or https://youtube.com/shorts/..." />
+          </label>
+
+          <label class="field wide source-file hidden">
+            <span>Video file</span>
+            <input id="fileInput" name="file" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mp4,.mov,.webm,.mkv,.m4v" />
+          </label>
+
+          <label class="field">
+            <span>Category</span>
+            <select id="categoryInput" name="category">
+              <option value="short">Short clip</option>
+              <option value="funny">Funny</option>
+              <option value="news">News</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+
+          <label class="field cookies-field">
+            <span>Cookies</span>
+            <select id="browserInput" name="browser">
+              <option value="auto">Auto</option>
+              <option value="firefox">Firefox</option>
+              <option value="chrome">Chrome</option>
+              <option value="edge">Edge</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+
+          <label class="check">
+            <input id="normalizeInput" name="normalize" type="checkbox" checked />
+            <span>Normalize to 1080x1920 MP4</span>
+          </label>
+
+          <label class="check">
+            <input id="transcribeInput" name="transcribe" type="checkbox" />
+            <span>Transcribe audio</span>
+          </label>
+
+          <label class="check">
+            <input id="highlightsInput" name="highlights" type="checkbox" />
+            <span>Create highlight clips</span>
+          </label>
+
+          <label class="check wide-check">
+            <input id="rightsInput" name="rights_confirmed" type="checkbox" required />
+            <span>I own this content or have permission to reuse it</span>
+          </label>
+
+          <label class="field highlight-length">
+            <span>Clip length</span>
+            <select id="highlightLengthInput" name="highlight_length">
+              <option value="15">15 sec</option>
+              <option value="30">30 sec</option>
+              <option value="60">60 sec</option>
+            </select>
+          </label>
+
+          <button id="submitBtn" type="submit">Start job</button>
+        </form>
+      </section>
+
+      <section class="content">
+        <div class="jobs">
+          <h2>Jobs</h2>
+          <div id="jobsList" class="job-list"></div>
+        </div>
+        <aside class="details">
+          <h2>Details</h2>
+          <div id="jobDetails" class="empty">Select a job to view files and logs.</div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
