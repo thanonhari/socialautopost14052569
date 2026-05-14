@@ -17,7 +17,7 @@ from email.parser import BytesParser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
@@ -27,6 +27,7 @@ WEB_ROOT = ROOT / "web"
 STORAGE_ROOT = ROOT / "storage"
 JOBS_ROOT = STORAGE_ROOT / "jobs"
 JOBS_INDEX = STORAGE_ROOT / "jobs.json"
+OAUTH_ROOT = STORAGE_ROOT / "oauth"
 
 ALLOWED_HOSTS = {
     "x.com",
@@ -78,6 +79,7 @@ class Job:
     compatibility: dict[str, dict[str, object]] = field(default_factory=dict)
     autopost_status: str = "idle"
     autopost_report: dict[str, object] = field(default_factory=dict)
+    autopost_control: str = "active"
 
 
 jobs: dict[str, Job] = {}
@@ -110,6 +112,7 @@ def load_jobs() -> None:
             item.setdefault("compatibility", {})
             item.setdefault("autopost_status", "idle")
             item.setdefault("autopost_report", {})
+            item.setdefault("autopost_control", "active")
             item.setdefault("progress", 100 if item.get("status") == "done" else 0)
             jobs[item["id"]] = Job(**item)
 
@@ -745,6 +748,8 @@ def run_autopost_task(job_id: str, platforms: list[str], language: str, dry_run:
     job_dir = JOBS_ROOT / job_id
     report_path = job_dir / "autopost.report.json"
     queue_path = job_dir / "autopost.queue.json"
+    control_path = job_dir / "autopost.control.json"
+    audit_path = job_dir / "autopost.audit.jsonl"
     try:
         with jobs_lock:
             job = jobs[job_id]
@@ -767,6 +772,10 @@ def run_autopost_task(job_id: str, platforms: list[str], language: str, dry_run:
                 caption_variants = json.loads(platform_caption_path.read_text(encoding="utf-8"))
 
         started_at = time.time()
+        operator = str(job.autopost_report.get("operator", "unknown")) if isinstance(job.autopost_report, dict) else "unknown"
+        write_autopost_control(control_path, "active")
+        operator = str(job.autopost_report.get("operator", "unknown")) if isinstance(job.autopost_report, dict) else "unknown"
+        append_audit_event(audit_path, "autopost_started", {"job_id": job_id, "platforms": platforms, "dry_run": dry_run, "language": language, "operator": operator})
         token_check = get_autopost_token_status(platforms)
         endpoint_check = get_autopost_endpoint_status(platforms)
         results: list[dict[str, object]] = []
@@ -775,6 +784,7 @@ def run_autopost_task(job_id: str, platforms: list[str], language: str, dry_run:
             clip_index = int(item.get("clip_index", 0))
             final_video = str(item.get("final_video", ""))
             for platform in platforms:
+                wait_for_autopost_resume(job_id, control_path, audit_path)
                 post_id = f"{platform}_{job_id}_{clip_index:02}_{int(time.time())}"
                 caption = str(caption_variants.get(platform, {}).get(language, "")).strip()
                 if not caption:
@@ -803,10 +813,12 @@ def run_autopost_task(job_id: str, platforms: list[str], language: str, dry_run:
                     }
                 )
                 write_autopost_queue(queue_path, queue_items)
+                append_audit_event(audit_path, "delivery_queued", {"job_id": job_id, "post_id": post_id, "platform": platform, "clip_index": clip_index, "operator": operator})
 
                 result["delivery_state"] = "sending"
                 update_queue_state(queue_items, post_id, "sending")
                 write_autopost_queue(queue_path, queue_items)
+                append_audit_event(audit_path, "delivery_sending", {"job_id": job_id, "post_id": post_id, "platform": platform, "clip_index": clip_index, "operator": operator})
 
                 if dry_run:
                     result["status"] = "simulated"
@@ -825,6 +837,20 @@ def run_autopost_task(job_id: str, platforms: list[str], language: str, dry_run:
 
                 update_queue_state(queue_items, post_id, str(result.get("delivery_state", "failed")))
                 write_autopost_queue(queue_path, queue_items)
+                append_audit_event(
+                    audit_path,
+                    "delivery_finished",
+                    {
+                        "job_id": job_id,
+                        "post_id": post_id,
+                        "platform": platform,
+                        "clip_index": clip_index,
+                        "status": result.get("status"),
+                        "delivery_state": result.get("delivery_state"),
+                        "remote_id": result.get("remote_id", ""),
+                        "operator": operator,
+                    },
+                )
                 results.append(result)
 
         report = {
@@ -837,6 +863,8 @@ def run_autopost_task(job_id: str, platforms: list[str], language: str, dry_run:
             "token_status": token_check,
             "endpoint_status": endpoint_check,
             "queue_file": rel_path(queue_path),
+            "control_file": rel_path(control_path),
+            "audit_file": rel_path(audit_path),
             "results": results,
         }
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -845,8 +873,11 @@ def run_autopost_task(job_id: str, platforms: list[str], language: str, dry_run:
             job = jobs[job_id]
             job.files["autopost_report"] = rel_path(report_path)
             job.files["autopost_queue"] = rel_path(queue_path)
+            job.files["autopost_control"] = rel_path(control_path)
+            job.files["autopost_audit"] = rel_path(audit_path)
         save_jobs()
-        update_job(job_id, autopost_status="done", autopost_report=report, files=jobs[job_id].files)
+        append_audit_event(audit_path, "autopost_finished", {"job_id": job_id, "status": "done", "operator": operator})
+        update_job(job_id, autopost_status="done", autopost_report=report, files=jobs[job_id].files, autopost_control="active")
     except Exception as exc:
         error_report = {
             "status": "failed",
@@ -861,9 +892,162 @@ def run_autopost_task(job_id: str, platforms: list[str], language: str, dry_run:
             job = jobs[job_id]
             job.files["autopost_report"] = rel_path(report_path)
             job.files["autopost_queue"] = rel_path(queue_path)
+            job.files["autopost_control"] = rel_path(control_path)
+            job.files["autopost_audit"] = rel_path(audit_path)
         save_jobs()
-        update_job(job_id, autopost_status="failed", autopost_report=error_report, files=jobs[job_id].files)
+        append_audit_event(audit_path, "autopost_failed", {"job_id": job_id, "error": str(exc), "operator": operator if 'operator' in locals() else "unknown"})
+        update_job(job_id, autopost_status="failed", autopost_report=error_report, files=jobs[job_id].files, autopost_control="active")
         append_log(job_id, f"Autopost failed: {exc}")
+
+
+def append_audit_event(audit_path: Path, action: str, payload: dict[str, object]) -> None:
+    record = {
+        "timestamp": time.time(),
+        "action": action,
+        "payload": payload,
+    }
+    with audit_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def resolve_operator(headers: object | None = None, payload: dict[str, object] | None = None) -> str:
+    if payload:
+        operator = str(payload.get("operator", "")).strip()
+        if operator:
+            return operator[:120]
+    if headers:
+        operator = str(headers.get("x-operator", "")).strip()
+        if operator:
+            return operator[:120]
+    return "unknown"
+
+
+def write_autopost_control(control_path: Path, state: str) -> None:
+    control_path.write_text(json.dumps({"updated_at": time.time(), "state": state}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def read_autopost_control(control_path: Path) -> str:
+    if not control_path.exists():
+        return "active"
+    try:
+        payload = json.loads(control_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return "active"
+    state = str(payload.get("state", "active")).strip().lower()
+    return state if state in {"active", "paused"} else "active"
+
+
+def wait_for_autopost_resume(job_id: str, control_path: Path, audit_path: Path) -> None:
+    was_paused = False
+    while read_autopost_control(control_path) == "paused":
+        if not was_paused:
+            append_audit_event(audit_path, "autopost_paused", {"job_id": job_id})
+            update_job(job_id, autopost_control="paused")
+            was_paused = True
+        time.sleep(1.0)
+    if was_paused:
+        append_audit_event(audit_path, "autopost_resumed", {"job_id": job_id})
+        update_job(job_id, autopost_control="active")
+
+
+def run_autopost_retry_task(job_id: str, retry_targets: list[dict[str, object]]) -> None:
+    job_dir = JOBS_ROOT / job_id
+    report_path = job_dir / "autopost.report.json"
+    queue_path = job_dir / "autopost.queue.json"
+    control_path = job_dir / "autopost.control.json"
+    audit_path = job_dir / "autopost.audit.jsonl"
+    try:
+        with jobs_lock:
+            job = jobs[job_id]
+        caption_variants = {}
+        platform_caption_rel = job.files.get("platform_captions")
+        if platform_caption_rel:
+            platform_caption_path = ROOT / platform_caption_rel
+            if platform_caption_path.exists():
+                caption_variants = json.loads(platform_caption_path.read_text(encoding="utf-8"))
+        exports_index_rel = job.files.get("exports_index")
+        if not exports_index_rel:
+            raise RuntimeError("No export package found")
+        exports_index = json.loads((ROOT / exports_index_rel).read_text(encoding="utf-8"))
+        export_map = {int(item.get("clip_index", 0)): item for item in exports_index}
+
+        write_autopost_control(control_path, "active")
+        token_check = get_autopost_token_status([str(item["platform"]) for item in retry_targets])
+        endpoint_check = get_autopost_endpoint_status([str(item["platform"]) for item in retry_targets])
+        queue_items: list[dict[str, object]] = []
+        results: list[dict[str, object]] = []
+        for target in retry_targets:
+            wait_for_autopost_resume(job_id, control_path, audit_path)
+            clip_index = int(target["clip_index"])
+            platform = str(target["platform"])
+            language = str(target.get("language", "en"))
+            export_item = export_map.get(clip_index)
+            if not export_item:
+                continue
+            final_video = str(export_item.get("final_video", ""))
+            post_id = f"{platform}_{job_id}_{clip_index:02}_{int(time.time())}"
+            caption = str(caption_variants.get(platform, {}).get(language, "")).strip()
+            if not caption:
+                caption = f"{job.title or 'SocialAutoPost Clip'}\n\n#shortvideo"
+            result = {
+                "clip_index": clip_index,
+                "platform": platform,
+                "language": language,
+                "dry_run": False,
+                "status": "ready",
+                "video_file": final_video,
+                "caption_preview": normalize_caption_text(caption, 220),
+                "caption": caption,
+                "post_id": post_id,
+                "timestamp": time.time(),
+                "delivery_state": "queued",
+            }
+            queue_items.append({"post_id": post_id, "clip_index": clip_index, "platform": platform, "delivery_state": "queued", "updated_at": time.time()})
+            write_autopost_queue(queue_path, queue_items)
+            append_audit_event(audit_path, "delivery_retry_queued", {"job_id": job_id, "post_id": post_id, "platform": platform, "clip_index": clip_index, "operator": operator})
+            result["delivery_state"] = "sending"
+            update_queue_state(queue_items, post_id, "sending")
+            write_autopost_queue(queue_path, queue_items)
+
+            if not token_check.get(platform, False):
+                result["status"] = "blocked"
+                result["error"] = f"Missing token env: {autopost_token_env(platform)}"
+                result["delivery_state"] = "blocked"
+            elif not endpoint_check.get(platform, False):
+                result["status"] = "blocked"
+                result["error"] = f"Missing endpoint env: {autopost_endpoint_env(platform)}"
+                result["delivery_state"] = "blocked"
+            else:
+                result = autopost_send_live(platform, result)
+                result["delivery_state"] = "posted" if result.get("status") == "posted" else "failed"
+
+            update_queue_state(queue_items, post_id, str(result.get("delivery_state", "failed")))
+            write_autopost_queue(queue_path, queue_items)
+            append_audit_event(audit_path, "delivery_retry_finished", {"job_id": job_id, "post_id": post_id, "status": result.get("status"), "delivery_state": result.get("delivery_state"), "operator": operator})
+            results.append(result)
+
+        report = {
+            "status": "done",
+            "started_at": time.time(),
+            "finished_at": time.time(),
+            "retry": True,
+            "results": results,
+            "queue_file": rel_path(queue_path),
+            "control_file": rel_path(control_path),
+            "audit_file": rel_path(audit_path),
+        }
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        with jobs_lock:
+            job = jobs[job_id]
+            job.files["autopost_report"] = rel_path(report_path)
+            job.files["autopost_queue"] = rel_path(queue_path)
+            job.files["autopost_control"] = rel_path(control_path)
+            job.files["autopost_audit"] = rel_path(audit_path)
+        save_jobs()
+        update_job(job_id, autopost_status="done", autopost_report=report, files=jobs[job_id].files, autopost_control="active")
+    except Exception as exc:
+        append_audit_event(audit_path, "autopost_retry_failed", {"job_id": job_id, "error": str(exc), "operator": operator if 'operator' in locals() else "unknown"})
+        update_job(job_id, autopost_status="failed", autopost_report={"status": "failed", "error": str(exc), "retry": True}, autopost_control="active")
 
 
 def write_autopost_queue(queue_path: Path, queue_items: list[dict[str, object]]) -> None:
@@ -889,6 +1073,14 @@ def autopost_token_env(platform: str) -> str:
         "shorts": "SOCIALAUTOPOST_SHORTS_TOKEN",
     }
     return env_map.get(platform, "")
+
+
+def autopost_adapter_mode(platform: str) -> str:
+    env_name = f"SOCIALAUTOPOST_{platform.upper()}_ADAPTER"
+    value = os.environ.get(env_name, "").strip().lower()
+    if platform == "shorts" and value == "native":
+        return "native"
+    return "webhook"
 
 
 def autopost_endpoint_env(platform: str) -> str:
@@ -920,6 +1112,9 @@ def get_autopost_token_status(platforms: list[str]) -> dict[str, bool]:
 def get_autopost_endpoint_status(platforms: list[str]) -> dict[str, bool]:
     status: dict[str, bool] = {}
     for platform in platforms:
+        if autopost_adapter_mode(platform) == "native":
+            status[platform] = True
+            continue
         env_name = autopost_endpoint_env(platform)
         status[platform] = bool(env_name and os.environ.get(env_name))
     return status
@@ -954,6 +1149,8 @@ def extract_remote_post_fields(response_body: str) -> dict[str, object]:
 
 
 def autopost_send_live(platform: str, base_result: dict[str, object]) -> dict[str, object]:
+    if platform == "shorts" and autopost_adapter_mode(platform) == "native":
+        return autopost_send_youtube_shorts_native(base_result)
     output = dict(base_result)
     token_env = autopost_token_env(platform)
     endpoint_env = autopost_endpoint_env(platform)
@@ -1029,6 +1226,208 @@ def autopost_send_live(platform: str, base_result: dict[str, object]) -> dict[st
             output["attempt"] = attempt + 1
             return output
     return output
+
+
+def autopost_send_youtube_shorts_native(base_result: dict[str, object]) -> dict[str, object]:
+    output = dict(base_result)
+    token = get_youtube_shorts_access_token()
+    if not token:
+        output["status"] = "blocked"
+        output["error"] = "Missing usable YouTube Shorts access token or refresh-token configuration"
+        return output
+
+    video_file = str(output.get("video_file", "")).strip()
+    if not video_file:
+        output["status"] = "failed"
+        output["error"] = "Missing video file"
+        return output
+    video_path = ROOT / video_file
+    if not video_path.exists():
+        output["status"] = "failed"
+        output["error"] = f"Video file not found: {video_file}"
+        return output
+
+    title = normalize_caption_text(str(output.get("caption", "")).splitlines()[0].strip() or "SocialAutoPost Short", 100)
+    description = normalize_caption_text(str(output.get("caption", "")).strip(), 5000)
+    privacy_status = os.environ.get("SOCIALAUTOPOST_SHORTS_PRIVACY_STATUS", "private").strip().lower() or "private"
+    category_id = os.environ.get("SOCIALAUTOPOST_SHORTS_CATEGORY_ID", "22").strip() or "22"
+    made_for_kids = os.environ.get("SOCIALAUTOPOST_SHORTS_MADE_FOR_KIDS", "false").strip().lower() in {"1", "true", "yes", "on"}
+    timeout_seconds = parse_env_int("SOCIALAUTOPOST_AUTOPOST_TIMEOUT_SEC", 20, minimum=5, maximum=120)
+
+    metadata = {
+        "snippet": {
+            "title": title,
+            "description": description,
+            "categoryId": category_id,
+        },
+        "status": {
+            "privacyStatus": privacy_status,
+            "selfDeclaredMadeForKids": made_for_kids,
+        },
+    }
+    session_uri = youtube_start_resumable_upload(token, metadata, video_path, timeout_seconds)
+    upload_result = youtube_upload_file_to_session(session_uri, video_path, timeout_seconds)
+    output["status"] = "posted"
+    output["http_status"] = int(upload_result.get("http_status", 200))
+    output["response_preview"] = normalize_caption_text(str(upload_result.get("response_body", "")), 220)
+    output.update(extract_remote_post_fields(str(upload_result.get("response_body", ""))))
+    return output
+
+
+def youtube_start_resumable_upload(token: str, metadata: dict[str, object], video_path: Path, timeout_seconds: int) -> str:
+    body = json.dumps(metadata, ensure_ascii=False).encode("utf-8")
+    mime_type = mimetypes.guess_type(video_path.name)[0] or "application/octet-stream"
+    request = Request(
+        "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+            "Content-Length": str(len(body)),
+            "X-Upload-Content-Length": str(video_path.stat().st_size),
+            "X-Upload-Content-Type": mime_type,
+            "User-Agent": "SocialAutoPostLocal/0.1",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            session_uri = response.headers.get("Location", "").strip()
+            if not session_uri:
+                raise RuntimeError("YouTube upload session did not return a Location header")
+            return session_uri
+    except HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+        raise RuntimeError(f"YouTube session init failed ({exc.code}): {normalize_caption_text(error_body, 220)}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"YouTube session init failed: {exc.reason}") from exc
+
+
+def youtube_upload_file_to_session(session_uri: str, video_path: Path, timeout_seconds: int) -> dict[str, object]:
+    mime_type = mimetypes.guess_type(video_path.name)[0] or "application/octet-stream"
+    body = video_path.read_bytes()
+    request = Request(
+        session_uri,
+        data=body,
+        headers={
+            "Content-Type": mime_type,
+            "Content-Length": str(len(body)),
+        },
+        method="PUT",
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            return {
+                "http_status": int(getattr(response, "status", 200)),
+                "response_body": response.read().decode("utf-8", errors="replace"),
+            }
+    except HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+        raise RuntimeError(f"YouTube upload failed ({exc.code}): {normalize_caption_text(error_body, 220)}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"YouTube upload failed: {exc.reason}") from exc
+
+
+def get_youtube_shorts_access_token() -> str:
+    token_env = autopost_token_env("shorts")
+    direct_token = os.environ.get(token_env, "").strip()
+    expires_at = parse_env_float("SOCIALAUTOPOST_SHORTS_TOKEN_EXPIRES_AT", 0.0)
+    now = time.time()
+    if direct_token and (expires_at <= 0 or now < expires_at - 60):
+        return direct_token
+
+    cached = load_youtube_shorts_token_cache()
+    cached_token = str(cached.get("access_token", "")).strip()
+    cached_expires_at = float(cached.get("expires_at", 0.0) or 0.0)
+    if cached_token and now < cached_expires_at - 60:
+        return cached_token
+
+    refresh_token = os.environ.get("SOCIALAUTOPOST_SHORTS_REFRESH_TOKEN", "").strip()
+    client_id = os.environ.get("SOCIALAUTOPOST_SHORTS_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("SOCIALAUTOPOST_SHORTS_CLIENT_SECRET", "").strip()
+    if not (refresh_token and client_id and client_secret):
+        return direct_token
+
+    refreshed = refresh_google_access_token(refresh_token, client_id, client_secret)
+    access_token = str(refreshed.get("access_token", "")).strip()
+    expires_in = float(refreshed.get("expires_in", 0.0) or 0.0)
+    if access_token and expires_in > 0:
+        save_youtube_shorts_token_cache(
+            {
+                "access_token": access_token,
+                "expires_at": time.time() + expires_in,
+                "token_type": refreshed.get("token_type", "Bearer"),
+                "scope": refreshed.get("scope", ""),
+            }
+        )
+    return access_token
+
+
+def youtube_shorts_token_cache_path() -> Path:
+    OAUTH_ROOT.mkdir(parents=True, exist_ok=True)
+    return OAUTH_ROOT / "shorts.token.json"
+
+
+def load_youtube_shorts_token_cache() -> dict[str, object]:
+    path = youtube_shorts_token_cache_path()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def save_youtube_shorts_token_cache(payload: dict[str, object]) -> None:
+    path = youtube_shorts_token_cache_path()
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def refresh_google_access_token(refresh_token: str, client_id: str, client_secret: str) -> dict[str, object]:
+    body_text = (
+        f"client_id={urlencode_value(client_id)}&"
+        f"client_secret={urlencode_value(client_secret)}&"
+        f"refresh_token={urlencode_value(refresh_token)}&"
+        "grant_type=refresh_token"
+    )
+    body = body_text.encode("utf-8")
+    request = Request(
+        "https://oauth2.googleapis.com/token",
+        data=body,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Length": str(len(body)),
+            "User-Agent": "SocialAutoPostLocal/0.1",
+        },
+        method="POST",
+    )
+    timeout_seconds = parse_env_int("SOCIALAUTOPOST_AUTOPOST_TIMEOUT_SEC", 20, minimum=5, maximum=120)
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+            if not isinstance(payload, dict):
+                raise RuntimeError("Google token endpoint returned invalid JSON")
+            return payload
+    except HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+        raise RuntimeError(f"Google token refresh failed ({exc.code}): {normalize_caption_text(error_body, 220)}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Google token refresh failed: {exc.reason}") from exc
+
+
+def urlencode_value(value: str) -> str:
+    return quote(value, safe="")
+
+
+def parse_env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
 
 def parse_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -1647,6 +2046,18 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/jobs/upload":
             self.handle_upload_job()
             return
+        if parsed.path.startswith("/api/jobs/") and parsed.path.endswith("/autopost/retry"):
+            job_id = parsed.path.split("/")[-3]
+            self.handle_autopost_retry(job_id)
+            return
+        if parsed.path.startswith("/api/jobs/") and parsed.path.endswith("/autopost/pause"):
+            job_id = parsed.path.split("/")[-3]
+            self.handle_autopost_pause(job_id)
+            return
+        if parsed.path.startswith("/api/jobs/") and parsed.path.endswith("/autopost/resume"):
+            job_id = parsed.path.split("/")[-3]
+            self.handle_autopost_resume(job_id)
+            return
         if parsed.path.startswith("/api/jobs/") and parsed.path.endswith("/autopost"):
             job_id = parsed.path.split("/")[-2]
             self.handle_autopost(job_id)
@@ -1756,6 +2167,7 @@ class AppHandler(BaseHTTPRequestHandler):
     def handle_autopost(self, job_id: str) -> None:
         try:
             payload = self.read_json()
+            operator = resolve_operator(self.headers, payload)
             dry_run = bool(payload.get("dry_run", True))
             language = str(payload.get("language", "en")).lower()
             if language not in {"en", "th"}:
@@ -1786,6 +2198,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "platforms": platforms,
                     "dry_run": dry_run,
                     "language": language,
+                    "operator": operator,
                 },
             )
             threading.Thread(
@@ -1794,6 +2207,83 @@ class AppHandler(BaseHTTPRequestHandler):
                 daemon=True,
             ).start()
             self.send_json({"ok": True, "status": "running"})
+        except Exception as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def handle_autopost_pause(self, job_id: str) -> None:
+        try:
+            operator = resolve_operator(self.headers, None)
+            with jobs_lock:
+                job = jobs.get(job_id)
+            if not job:
+                self.send_json({"error": "Job not found"}, HTTPStatus.NOT_FOUND)
+                return
+            control_path = JOBS_ROOT / job_id / "autopost.control.json"
+            write_autopost_control(control_path, "paused")
+            audit_path = JOBS_ROOT / job_id / "autopost.audit.jsonl"
+            append_audit_event(audit_path, "operator_pause", {"job_id": job_id, "operator": operator})
+            update_job(job_id, autopost_control="paused")
+            self.send_json({"ok": True, "control": "paused"})
+        except Exception as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def handle_autopost_resume(self, job_id: str) -> None:
+        try:
+            operator = resolve_operator(self.headers, None)
+            with jobs_lock:
+                job = jobs.get(job_id)
+            if not job:
+                self.send_json({"error": "Job not found"}, HTTPStatus.NOT_FOUND)
+                return
+            control_path = JOBS_ROOT / job_id / "autopost.control.json"
+            write_autopost_control(control_path, "active")
+            audit_path = JOBS_ROOT / job_id / "autopost.audit.jsonl"
+            append_audit_event(audit_path, "operator_resume", {"job_id": job_id, "operator": operator})
+            update_job(job_id, autopost_control="active")
+            self.send_json({"ok": True, "control": "active"})
+        except Exception as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def handle_autopost_retry(self, job_id: str) -> None:
+        try:
+            operator = resolve_operator(self.headers, None)
+            with jobs_lock:
+                job = jobs.get(job_id)
+            if not job:
+                self.send_json({"error": "Job not found"}, HTTPStatus.NOT_FOUND)
+                return
+            if job.autopost_status == "running":
+                raise ValueError("Autopost is already running")
+            report = job.autopost_report if isinstance(job.autopost_report, dict) else {}
+            prior_results = report.get("results", [])
+            retry_targets = [
+                {
+                    "clip_index": int(item.get("clip_index", 0)),
+                    "platform": str(item.get("platform", "")).lower(),
+                    "language": str(item.get("language", "en")).lower(),
+                }
+                for item in prior_results
+                if str(item.get("delivery_state", "")).lower() in {"failed", "blocked"}
+            ]
+            if not retry_targets:
+                raise ValueError("No failed or blocked deliveries to retry")
+
+            update_job(
+                job_id,
+                autopost_status="running",
+                autopost_control="active",
+                autopost_report={
+                    "status": "running",
+                    "started_at": time.time(),
+                    "retry": True,
+                    "retry_count": len(retry_targets),
+                    "operator": operator,
+                },
+            )
+            audit_path = JOBS_ROOT / job_id / "autopost.audit.jsonl"
+            append_audit_event(audit_path, "operator_retry", {"job_id": job_id, "retry_count": len(retry_targets), "operator": operator})
+            threading.Thread(target=run_autopost_retry_task, args=(job_id, retry_targets), daemon=True).start()
+            self.send_json({"ok": True, "status": "running", "retry_count": len(retry_targets)})
         except Exception as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
 

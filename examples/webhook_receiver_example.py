@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,7 +17,10 @@ PLATFORM_SECRET_MAP = {
     "shorts": os.environ.get("SOCIALAUTOPOST_WEBHOOK_SHORTS_SECRET", ""),
 }
 MAX_SKEW_SECONDS = int(os.environ.get("SOCIALAUTOPOST_WEBHOOK_MAX_SKEW_SEC", "300"))
+REPLAY_TTL_SECONDS = int(os.environ.get("SOCIALAUTOPOST_WEBHOOK_REPLAY_TTL_SEC", "300"))
 PORT = int(os.environ.get("SOCIALAUTOPOST_WEBHOOK_PORT", "8899"))
+SEEN_REQUESTS: dict[str, float] = {}
+SEEN_REQUESTS_LOCK = threading.Lock()
 
 
 def compute_signature(secret: str, timestamp: str, body: bytes) -> str:
@@ -45,6 +49,31 @@ def verify_request(secret: str, signature: str, timestamp: str, body: bytes, max
     return True, ""
 
 
+def purge_seen_requests(now: float) -> None:
+    expired = [key for key, expires_at in SEEN_REQUESTS.items() if expires_at <= now]
+    for key in expired:
+        SEEN_REQUESTS.pop(key, None)
+
+
+def build_replay_key(signature: str, idempotency_key: str, post_id: str) -> str:
+    if idempotency_key:
+        return f"idempotency:{idempotency_key}"
+    if post_id:
+        return f"post:{post_id}"
+    return f"signature:{signature}"
+
+
+def check_and_store_replay(signature: str, idempotency_key: str, post_id: str, ttl_seconds: int) -> tuple[bool, str]:
+    replay_key = build_replay_key(signature, idempotency_key, post_id)
+    now = time.time()
+    with SEEN_REQUESTS_LOCK:
+        purge_seen_requests(now)
+        if replay_key in SEEN_REQUESTS:
+            return False, replay_key
+        SEEN_REQUESTS[replay_key] = now + ttl_seconds
+    return True, replay_key
+
+
 class WebhookHandler(BaseHTTPRequestHandler):
     server_version = "SocialAutoPostWebhookExample/0.1"
 
@@ -56,6 +85,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         signature = self.headers.get("x-signature", "")
         timestamp = self.headers.get("x-timestamp", "")
+        idempotency_key = self.headers.get("x-idempotency-key", "")
         try:
             payload = json.loads(body.decode("utf-8"))
         except json.JSONDecodeError:
@@ -63,11 +93,24 @@ class WebhookHandler(BaseHTTPRequestHandler):
             return
 
         platform = str(payload.get("platform", "")).lower()
+        post_id = str(payload.get("post_id", "")).strip()
         tenant_header = self.headers.get("x-platform", "").lower()
         secret = resolve_signing_secret(platform, tenant_header)
         ok, reason = verify_request(secret, signature, timestamp, body, MAX_SKEW_SECONDS)
         if not ok:
             self.send_json({"ok": False, "error": reason, "platform": platform or tenant_header}, HTTPStatus.UNAUTHORIZED)
+            return
+        replay_ok, replay_key = check_and_store_replay(signature, idempotency_key, post_id, REPLAY_TTL_SECONDS)
+        if not replay_ok:
+            self.send_json(
+                {
+                    "ok": False,
+                    "error": "replay detected",
+                    "platform": platform or tenant_header,
+                    "replay_key": replay_key,
+                },
+                HTTPStatus.CONFLICT,
+            )
             return
 
         remote_id = f"posted_{int(time.time())}"

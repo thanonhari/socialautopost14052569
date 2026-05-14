@@ -79,6 +79,16 @@ button:disabled {
   margin-bottom: 18px;
 }
 
+.toolbar-actions {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+
+.operator-field {
+  min-width: 220px;
+}
+
 h1,
 h2,
 p {
@@ -425,6 +435,12 @@ input[type="file"] {
 }
 
 .autopost-platforms {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.autopost-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;

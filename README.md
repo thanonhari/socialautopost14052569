@@ -81,6 +81,28 @@ $env:SOCIALAUTOPOST_AUTOPOST_RETRIES="2"
 python app.py
 ```
 
+### YouTube Shorts Native Adapter
+
+For a native YouTube Shorts upload path, set:
+
+```powershell
+$env:SOCIALAUTOPOST_SHORTS_ADAPTER="native"
+$env:SOCIALAUTOPOST_SHORTS_TOKEN="ya29..."
+$env:SOCIALAUTOPOST_SHORTS_TOKEN_EXPIRES_AT="1767225600"
+$env:SOCIALAUTOPOST_SHORTS_REFRESH_TOKEN="1//..."
+$env:SOCIALAUTOPOST_SHORTS_CLIENT_ID="..."
+$env:SOCIALAUTOPOST_SHORTS_CLIENT_SECRET="..."
+$env:SOCIALAUTOPOST_SHORTS_PRIVACY_STATUS="private"
+$env:SOCIALAUTOPOST_SHORTS_CATEGORY_ID="22"
+$env:SOCIALAUTOPOST_SHORTS_MADE_FOR_KIDS="false"
+```
+
+Notes:
+
+- `SOCIALAUTOPOST_SHORTS_TOKEN` must be an OAuth access token with `https://www.googleapis.com/auth/youtube.upload`
+- If `SOCIALAUTOPOST_SHORTS_REFRESH_TOKEN`, `SOCIALAUTOPOST_SHORTS_CLIENT_ID`, and `SOCIALAUTOPOST_SHORTS_CLIENT_SECRET` are set, the app can refresh tokens automatically and cache them in `storage/oauth/shorts.token.json`
+- Unverified API projects may upload as `private` only until Google API audit requirements are satisfied
+
 Live requests send JSON with:
 
 - `platform`
@@ -111,6 +133,7 @@ $env:SOCIALAUTOPOST_WEBHOOK_SIGNING_SECRET="same_secret_as_sender"
 $env:SOCIALAUTOPOST_WEBHOOK_TIKTOK_SECRET="tiktok_secret"
 $env:SOCIALAUTOPOST_WEBHOOK_REELS_SECRET="reels_secret"
 $env:SOCIALAUTOPOST_WEBHOOK_SHORTS_SECRET="shorts_secret"
+$env:SOCIALAUTOPOST_WEBHOOK_REPLAY_TTL_SEC="300"
 python examples/webhook_receiver_example.py
 ```
 
@@ -123,6 +146,25 @@ $env:SOCIALAUTOPOST_TIKTOK_SIGNING_SECRET="same_secret_as_sender"
 
 The sample receiver verifies `X-Signature` + `X-Timestamp` and returns normalized fields (`id`, `status`, `url`) that are captured by autopost reports.  
 Secret resolution order: platform-specific (`SOCIALAUTOPOST_WEBHOOK_<PLATFORM>_SECRET`) then default (`SOCIALAUTOPOST_WEBHOOK_SIGNING_SECRET`).
+Replay detection uses `X-Idempotency-Key`, then `post_id`, then falls back to the signature digest within the TTL window.
+
+### Operator, Control, and Audit Flow
+
+The UI now supports an `Operator` field in the toolbar. Autopost actions send that value through `X-Operator` and record it in the audit log.
+
+Autopost runtime artifacts per job may now include:
+
+- `autopost.report.json`
+- `autopost.queue.json`
+- `autopost.control.json`
+- `autopost.audit.jsonl`
+
+Current operator controls:
+
+- Start autopost
+- Pause
+- Resume
+- Retry failed
 
 ## Output Structure
 

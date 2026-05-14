@@ -77,3 +77,23 @@ Extended `examples/webhook_receiver_example.py` to resolve signing secrets per p
 ## [2026-05-14] reliability | Added autopost delivery state machine and persistent queue artifact
 
 Autopost now tracks per-delivery state transitions (`queued -> sending -> posted/failed/blocked/simulated`) and writes queue progress to `autopost.queue.json` during execution. Job files now include both report and queue artifacts for operational traceability.
+
+## [2026-05-14] security | Added replay protection cache to webhook receiver example
+
+Extended `examples/webhook_receiver_example.py` with an in-memory TTL replay cache. The receiver now prefers `X-Idempotency-Key`, then `post_id`, then request signature to reject duplicate deliveries within the configured replay window.
+
+## [2026-05-14] feature | Added YouTube Shorts native upload adapter prototype
+
+Added a native live-post path for `shorts` using the YouTube Data API resumable upload flow. The current prototype starts an upload session, uploads the export MP4 directly, and maps the API response into normalized autopost result fields.
+
+## [2026-05-14] feature | Added autopost operator controls and audit log prototype
+
+Added pause/resume/retry control endpoints and UI buttons for autopost operations. The prototype now writes append-only audit events to `autopost.audit.jsonl` and uses `autopost.control.json` to coordinate pause/resume behavior with the running delivery loop.
+
+## [2026-05-14] auth | Added refresh-token lifecycle support for YouTube Shorts native posting
+
+Extended the Shorts native adapter to reuse valid access tokens, refresh expired tokens through Google's OAuth token endpoint, and persist a local token cache in `storage/oauth/shorts.token.json`. This reduces manual token rotation during repeated staging uploads.
+
+## [2026-05-14] audit | Added operator attribution for autopost actions
+
+Added operator attribution to autopost start/pause/resume/retry actions through `X-Operator` and request payload metadata. The UI now stores a local operator value and the audit log records that operator on delivery and control events.

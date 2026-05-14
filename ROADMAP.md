@@ -447,9 +447,9 @@ Harden Step 17 for live posting.
 The practical implementation path:
 
 1. Add delivery state machine + retry queue persistence (`queued -> sending -> posted/failed`) in job artifacts. (Done in prototype via `autopost.queue.json`)
-2. Add replay protection cache to receiver (nonce or idempotency store with TTL).
-3. Implement first platform-native adapter end-to-end (pick one: YouTube Shorts or TikTok) with real response mapping.
-4. Add operator actions in UI (`Retry failed`, `Pause`, `Resume`) and append-only audit log per job.
+2. Add replay protection cache to receiver (nonce or idempotency store with TTL). (Done in example receiver via in-memory TTL cache)
+3. Implement first platform-native adapter end-to-end (pick one: YouTube Shorts or TikTok) with real response mapping. (Prototype now includes YouTube Shorts native upload path)
+4. Add operator actions in UI (`Retry failed`, `Pause`, `Resume`) and append-only audit log per job. (Prototype now includes pause/resume/retry endpoints, UI buttons, and `autopost.audit.jsonl`)
 5. Enable live mode by default only after production endpoint verification and policy checks.
 
 ## What Is Still Left
@@ -457,9 +457,15 @@ The practical implementation path:
 The core media pipeline is complete. Remaining work is productionization for auto-posting:
 
 1. Replay protection cache in receiver (`nonce` / idempotency TTL store).
+Current prototype status: done in example receiver using in-memory TTL cache; production version should move this to a shared store.
+
 2. First platform-native adapter (instead of generic webhook) end-to-end.
+Current prototype status: YouTube Shorts native upload path added; still needs staging validation with real OAuth token.
+
 3. OAuth/token lifecycle automation (refresh, expiry handling, revocation path).
+Current prototype status: YouTube Shorts native path now supports access-token expiry checks, refresh-token exchange, and local token cache persistence.
 4. Operator controls in UI (`Retry failed`, `Pause`, `Resume`) and audit trail.
+Current prototype status: basic controls, operator attribution, and append-only JSONL audit log are implemented; production version still needs stronger auth integration and immutable storage.
 5. Policy/guardrails for production enablement (rate limits, account safety checks, approval gates).
 
 ## Work Deployment Checklist

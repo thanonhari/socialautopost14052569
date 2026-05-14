@@ -3,6 +3,7 @@ const jobDetails = document.querySelector("#jobDetails");
 const jobForm = document.querySelector("#jobForm");
 const refreshBtn = document.querySelector("#refreshBtn");
 const submitBtn = document.querySelector("#submitBtn");
+const operatorInput = document.querySelector("#operatorInput");
 const urlInput = document.querySelector("#urlInput");
 const fileInput = document.querySelector("#fileInput");
 const browserInput = document.querySelector("#browserInput");
@@ -15,6 +16,11 @@ const rightsInput = document.querySelector("#rightsInput");
 let selectedJobId = null;
 let latestJobs = [];
 const selectedPreviewByJob = {};
+const OPERATOR_STORAGE_KEY = "socialautopost.operator";
+
+function currentOperator() {
+  return (operatorInput?.value || "").trim();
+}
 
 function sourceMode() {
   return document.querySelector('input[name="sourceMode"]:checked').value;
@@ -214,7 +220,7 @@ function renderDetails(job) {
   const log = (job.log || []).map(escapeHtml).join("\n");
   const progress = progressValue(job);
   const compatibilityMarkup = renderCompatibility(job.compatibility || {});
-  const autopostMarkup = renderAutopost(job);
+  const autopostMarkup = renderAutopostV2(job);
   jobDetails.innerHTML = `
     <div class="meta">
       <strong>${escapeHtml(job.title || "Untitled")}</strong><br />
@@ -269,6 +275,18 @@ function renderDetails(job) {
       startAutopost(job.id, autopostButton, mode, language, platforms);
     });
   }
+  const pauseButton = jobDetails.querySelector("[data-autopost-pause]");
+  if (pauseButton) {
+    pauseButton.addEventListener("click", () => sendAutopostControl(job.id, "pause", pauseButton));
+  }
+  const resumeButton = jobDetails.querySelector("[data-autopost-resume]");
+  if (resumeButton) {
+    resumeButton.addEventListener("click", () => sendAutopostControl(job.id, "resume", resumeButton));
+  }
+  const retryButton = jobDetails.querySelector("[data-autopost-retry]");
+  if (retryButton) {
+    retryButton.addEventListener("click", () => sendAutopostControl(job.id, "retry", retryButton));
+  }
 }
 
 function renderCompatibility(compatibility) {
@@ -311,6 +329,7 @@ function renderCompatibility(compatibility) {
 function renderAutopost(job) {
   const canAutopost = job.status === "done" && Boolean(job.files?.exports_index);
   const status = job.autopost_status || "idle";
+  const control = job.autopost_control || "active";
   const summary = job.autopost_report?.status ? `Last run: ${job.autopost_report.status}` : "No run yet.";
   if (!canAutopost) {
     return '<div class="empty">Autopost requires completed job with export package.</div>';
@@ -341,6 +360,49 @@ function renderAutopost(job) {
       <button class="secondary full-width" type="button" data-autopost="1" ${status === "running" ? "disabled" : ""}>
         ${status === "running" ? "Autopost running..." : "Start autopost"}
       </button>
+    </div>
+  `;
+}
+
+function renderAutopostV2(job) {
+  const canAutopost = job.status === "done" && Boolean(job.files?.exports_index);
+  const status = job.autopost_status || "idle";
+  const control = job.autopost_control || "active";
+  const summary = job.autopost_report?.status ? `Last run: ${job.autopost_report.status}` : "No run yet.";
+  if (!canAutopost) {
+    return '<div class="empty">Autopost requires completed job with export package.</div>';
+  }
+  return `
+    <div class="autopost-shell">
+      <div class="meta">${escapeHtml(summary)} · Control: ${escapeHtml(control)}</div>
+      <label class="field">
+        <span>Mode</span>
+        <select data-autopost-mode>
+          <option value="dry" selected>Dry run</option>
+          <option value="live">Live (requires tokens)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Language</span>
+        <select data-autopost-language>
+          <option value="en" selected>English</option>
+          <option value="th">Thai</option>
+        </select>
+      </label>
+      <div class="autopost-platforms">
+        <label class="check"><input type="checkbox" data-autopost-platform="tiktok" value="tiktok" checked /><span>TikTok</span></label>
+        <label class="check"><input type="checkbox" data-autopost-platform="reels" value="reels" checked /><span>Reels</span></label>
+        <label class="check"><input type="checkbox" data-autopost-platform="shorts" value="shorts" checked /><span>Shorts</span></label>
+      </div>
+      <div class="meta">Live mode env: SOCIALAUTOPOST_[PLATFORM]_TOKEN + SOCIALAUTOPOST_[PLATFORM]_ENDPOINT</div>
+      <button class="secondary full-width" type="button" data-autopost="1" ${status === "running" ? "disabled" : ""}>
+        ${status === "running" ? "Autopost running..." : "Start autopost"}
+      </button>
+      <div class="autopost-actions">
+        <button class="secondary" type="button" data-autopost-pause ${status !== "running" || control === "paused" ? "disabled" : ""}>Pause</button>
+        <button class="secondary" type="button" data-autopost-resume ${control !== "paused" ? "disabled" : ""}>Resume</button>
+        <button class="secondary" type="button" data-autopost-retry ${status === "running" ? "disabled" : ""}>Retry failed</button>
+      </div>
     </div>
   `;
 }
@@ -431,16 +493,42 @@ async function startAutopost(jobId, button, mode = "dry", language = "en", platf
     }
     const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/autopost`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Operator": currentOperator(),
+      },
       body: JSON.stringify({
         dry_run: mode !== "live",
         language,
         platforms,
+        operator: currentOperator(),
       }),
     });
     const data = await response.json();
     if (!response.ok) {
       alert(data.error || "Could not start autopost");
+    }
+    await fetchJobs();
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function sendAutopostControl(jobId, action, button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = `${original}...`;
+  try {
+    const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/autopost/${action}`, {
+      method: "POST",
+      headers: {
+        "X-Operator": currentOperator(),
+      },
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      alert(data.error || `Could not ${action} autopost`);
     }
     await fetchJobs();
   } finally {
@@ -483,6 +571,14 @@ document.querySelectorAll('input[name="sourceMode"]').forEach((input) => {
 highlightsInput.addEventListener("change", syncHighlightMode);
 
 refreshBtn.addEventListener("click", fetchJobs);
+
+const savedOperator = localStorage.getItem(OPERATOR_STORAGE_KEY) || "";
+if (operatorInput) {
+  operatorInput.value = savedOperator;
+  operatorInput.addEventListener("input", () => {
+    localStorage.setItem(OPERATOR_STORAGE_KEY, operatorInput.value.trim());
+  });
+}
 
 syncSourceMode();
 syncHighlightMode();
