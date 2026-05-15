@@ -11,103 +11,113 @@
       <section class="toolbar">
         <div>
           <h1>SocialAutoPost Local</h1>
-          <p>Ingest X, Reddit, YouTube Shorts, or local video files, then prepare metadata, normalized MP4, caption draft, and a manifest for short-form posting workflows.</p>
+          <p>เตรียมคลิปสำหรับการโพสต์แบบ review-first โดยใช้ local/export media เป็นแกน, ทำ YouTube Shorts และ Instagram Reels แบบ native-first, และคง TikTok เป็น manual-first จนกว่าจะพร้อม official approval</p>
+          <p>นำเข้าลิงก์จาก TikTok, X, Reddit, YouTube หรือไฟล์วิดีโอในเครื่อง แล้วเตรียม metadata, วิดีโอ MP4 ที่ปรับขนาดแล้ว, caption draft และ manifest สำหรับ workflow โพสต์วิดีโอสั้น</p>
         </div>
         <div class="toolbar-actions">
           <label class="field operator-field">
-            <span>Operator</span>
-            <input id="operatorInput" type="text" placeholder="name or email" />
+            <span>ผู้ปฏิบัติงาน</span>
+            <input id="operatorInput" type="text" placeholder="ชื่อหรืออีเมล" />
           </label>
-          <button id="refreshBtn" type="button">Refresh</button>
+          <button id="diagnosticsBtn" type="button" class="secondary">ตรวจระบบ GPU</button>
+          <button id="refreshBtn" type="button">รีเฟรช</button>
         </div>
+      </section>
+
+      <section id="diagnosticsPanel" class="panel hidden">
+        <div class="panel-head">
+          <h2>สถานะระบบ</h2>
+          <button id="closeDiagnosticsBtn" type="button" class="secondary">ปิด</button>
+        </div>
+        <div id="diagnosticsContent" class="empty">กด "ตรวจระบบ GPU" เพื่อโหลดข้อมูล runtime</div>
       </section>
 
       <section class="panel">
         <form id="jobForm" class="job-form">
           <fieldset class="source-switch">
-            <legend>Source</legend>
+            <legend>แหล่งที่มา</legend>
             <label>
               <input type="radio" name="sourceMode" value="url" checked />
               <span>URL</span>
             </label>
             <label>
               <input type="radio" name="sourceMode" value="file" />
-              <span>Local file</span>
+              <span>ไฟล์ในเครื่อง</span>
             </label>
           </fieldset>
 
           <label class="field wide source-url">
-            <span>Source URL</span>
-            <input id="urlInput" name="url" type="url" placeholder="https://x.com/... or https://youtube.com/shorts/..." />
+            <span>ลิงก์ต้นทาง</span>
+            <input id="urlInput" name="url" type="url" placeholder="https://www.tiktok.com/@user/video/... or https://x.com/..." />
           </label>
 
           <label class="field wide source-file hidden">
-            <span>Video file</span>
+            <span>ไฟล์วิดีโอ</span>
             <input id="fileInput" name="file" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mp4,.mov,.webm,.mkv,.m4v" />
           </label>
 
           <label class="field">
-            <span>Category</span>
+            <span>หมวดหมู่</span>
             <select id="categoryInput" name="category">
-              <option value="short">Short clip</option>
-              <option value="funny">Funny</option>
-              <option value="news">News</option>
-              <option value="other">Other</option>
+              <option value="short">คลิปสั้น</option>
+              <option value="funny">ตลก</option>
+              <option value="news">ข่าว</option>
+              <option value="other">อื่นๆ</option>
             </select>
           </label>
 
           <label class="field cookies-field">
-            <span>Cookies</span>
+            <span>คุกกี้</span>
             <select id="browserInput" name="browser">
-              <option value="auto">Auto</option>
+              <option value="auto">อัตโนมัติ</option>
               <option value="firefox">Firefox</option>
               <option value="chrome">Chrome</option>
               <option value="edge">Edge</option>
-              <option value="none">None</option>
+              <option value="none">ไม่ใช้</option>
             </select>
           </label>
 
           <label class="check">
             <input id="normalizeInput" name="normalize" type="checkbox" checked />
-            <span>Normalize to 1080x1920 MP4</span>
+            <span>ปรับเป็น MP4 ขนาด 1080x1920</span>
           </label>
 
           <label class="check">
             <input id="transcribeInput" name="transcribe" type="checkbox" />
-            <span>Transcribe audio</span>
+            <span>ถอดเสียงจากวิดีโอ</span>
           </label>
 
           <label class="check">
             <input id="highlightsInput" name="highlights" type="checkbox" />
-            <span>Create highlight clips</span>
+            <span>สร้างคลิปไฮไลต์</span>
           </label>
 
           <label class="check wide-check">
             <input id="rightsInput" name="rights_confirmed" type="checkbox" required />
-            <span>I own this content or have permission to reuse it</span>
+            <span>ฉันเป็นเจ้าของคอนเทนต์นี้ หรือมีสิทธิ์นำกลับมาใช้</span>
           </label>
 
           <label class="field highlight-length">
-            <span>Clip length</span>
+            <span>ความยาวคลิป</span>
             <select id="highlightLengthInput" name="highlight_length">
-              <option value="15">15 sec</option>
-              <option value="30">30 sec</option>
-              <option value="60">60 sec</option>
+              <option value="15">15 วินาที</option>
+              <option value="30">30 วินาที</option>
+              <option value="60">60 วินาที</option>
             </select>
           </label>
 
-          <button id="submitBtn" type="submit">Start job</button>
+          <button id="submitBtn" type="submit">เริ่มงาน</button>
         </form>
       </section>
 
       <section class="content">
         <div class="jobs">
-          <h2>Jobs</h2>
+          <h2>งาน</h2>
           <div id="jobsList" class="job-list"></div>
         </div>
         <aside class="details">
-          <h2>Details</h2>
-          <div id="jobDetails" class="empty">Select a job to view files and logs.</div>
+          <h2>รายละเอียด</h2>
+          <div id="jobDetails" class="empty">เลือกงานเพื่อดูไฟล์และบันทึกการทำงาน</div>
         </aside>
       </section>
     </main>
