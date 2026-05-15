@@ -105,6 +105,19 @@ Notes:
 - If `SOCIALAUTOPOST_SHORTS_REFRESH_TOKEN`, `SOCIALAUTOPOST_SHORTS_CLIENT_ID`, and `SOCIALAUTOPOST_SHORTS_CLIENT_SECRET` are set, the app can refresh tokens automatically and cache them in `storage/oauth/shorts.token.json`
 - Unverified API projects may upload as `private` only until Google API audit requirements are satisfied
 
+Staging verification references:
+
+- `SHORTS_NATIVE_STAGING_CHECKLIST.md`
+- `run_shorts_native_staging_check.ps1`
+
+When real Google OAuth credentials are available, you can run:
+
+```powershell
+.\run_shorts_native_staging_check.ps1 -JobId <job_id> -StartApp
+```
+
+The helper validates required Shorts native env vars, triggers a live Shorts-only autopost run, waits for completion, and prints a compact artifact summary.
+
 Live requests send JSON with:
 
 - `platform`

@@ -959,6 +959,7 @@ def run_autopost_retry_task(job_id: str, retry_targets: list[dict[str, object]])
     try:
         with jobs_lock:
             job = jobs[job_id]
+        operator = str(job.autopost_report.get("operator", "unknown")) if isinstance(job.autopost_report, dict) else "unknown"
         caption_variants = {}
         platform_caption_rel = job.files.get("platform_captions")
         if platform_caption_rel:

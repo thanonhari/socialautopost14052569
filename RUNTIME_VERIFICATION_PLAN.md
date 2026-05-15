@@ -114,6 +114,11 @@ Preconditions:
 - set `SOCIALAUTOPOST_SHORTS_ADAPTER=native`
 - provide refresh token, client id, and client secret
 
+Reference material:
+
+- [SHORTS_NATIVE_STAGING_CHECKLIST.md](/D:/Projects/socialautopost/SHORTS_NATIVE_STAGING_CHECKLIST.md:1)
+- [run_shorts_native_staging_check.ps1](/D:/Projects/socialautopost/run_shorts_native_staging_check.ps1:1)
+
 Expected result:
 
 - token is refreshed when expired
@@ -129,3 +134,13 @@ The prototype passes runtime verification when:
 3. Replay protection blocks duplicate requests
 4. Retry flow only retries failed/blocked deliveries
 5. Native Shorts path can refresh token and reach upload session init
+
+## Staging Shortcut
+
+When real Google credentials are available, use:
+
+```powershell
+.\run_shorts_native_staging_check.ps1 -JobId <job_id> -StartApp
+```
+
+The helper script validates required env vars, triggers a live Shorts-only autopost run, waits for completion, and prints a compact artifact summary.
